@@ -1,0 +1,11 @@
+{
+  "api_key": "ta-clé-telescopius",
+  "host": "localhost",
+  "port": 8090,
+  "latitude": 48.8566,
+  "longitude": 2.3522,
+  "elevation": 35,
+  "location_name": "Paris",
+  "name_format": "name",
+  "cache_ttl_seconds": 600
+}

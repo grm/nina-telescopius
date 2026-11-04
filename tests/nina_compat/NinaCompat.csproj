@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Runs NINA's real Stellarium planetarium driver (vendor/, fetched by
+       fetch_nina_sources.sh) against the bridge. Only the NINA types it touches
+       but that drag in Windows-only dependencies are stubbed (Stubs.cs). -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <NoWarn>SYSLIB0014;SYSLIB0051;CS0168;CS8632</NoWarn>
+    <AssemblyName>NinaCompat</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+    <Compile Remove="vendor/**" />
+    <Compile Include="vendor/*.cs" />
+  </ItemGroup>
+</Project>

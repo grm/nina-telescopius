@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Telescopius → NINA</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Ctext y=%22.9em%22 font-size=%2290%22%3E%F0%9F%94%AD%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <h1>Telescopius <span class="arrow">→</span> NINA</h1>
+    <div class="topbar-right">
+      <span id="nina-status" class="pill" title="Dernières requêtes reçues de NINA">NINA : jamais contacté</span>
+      <button id="night-toggle" class="ghost" title="Mode nuit (rouge)">🌙</button>
+      <button id="open-settings" class="ghost">Réglages</button>
+    </div>
+  </header>
+
+  <div id="warnings"></div>
+
+  <section id="selection" class="selection empty">
+    <div class="selection-empty">
+      Aucune cible sélectionnée. Choisis une cible ci-dessous puis, dans NINA, clique sur l'icône
+      planétarium <em>« Obtenir les coordonnées du logiciel du planétarium »</em> (Assistant de cadrage ou cible du séquenceur).
+    </div>
+    <div class="selection-body">
+      <img id="sel-thumb" alt="" referrerpolicy="no-referrer">
+      <div class="sel-main">
+        <div class="sel-label">Cible envoyée à NINA</div>
+        <div id="sel-name" class="sel-name"></div>
+        <div id="sel-meta" class="sel-meta"></div>
+        <div id="sel-coords" class="sel-coords mono"></div>
+      </div>
+      <div class="sel-rotation">
+        <label class="check"><input type="checkbox" id="rot-enabled"> Transmettre la rotation</label>
+        <div class="rot-input">
+          <input type="number" id="rot-value" step="0.1" min="0" max="360" placeholder="0">
+          <span>° (angle de position)</span>
+        </div>
+        <div class="hint">Lue par NINA en même temps que les coordonnées.</div>
+      </div>
+      <button id="sel-clear" class="ghost danger" title="Ne plus rien envoyer à NINA">Retirer</button>
+    </div>
+  </section>
+
+  <nav class="tabs">
+    <button data-tab="tonight" class="active">Ce soir</button>
+    <button data-tab="search">Recherche</button>
+    <button data-tab="lists">Mes listes</button>
+  </nav>
+
+  <section class="panel" data-panel="tonight">
+    <form id="form-tonight" class="filters">
+      <label>Type
+        <select name="types" class="type-select"></select>
+      </label>
+      <label>Alt. min (°)
+        <input type="number" name="min_alt" min="0" max="90" value="30">
+      </label>
+      <label>Durée min (min)
+        <input type="number" name="min_alt_minutes" min="1" max="1440" value="120">
+      </label>
+      <label>Lune
+        <select name="moon_dist_min" class="moon-select"></select>
+      </label>
+      <label>Date
+        <input type="date" name="datetime">
+      </label>
+      <button type="submit">Actualiser</button>
+    </form>
+    <p class="panel-hint">Les cibles populaires les mieux placées en ce moment de l'année, pour ta position.</p>
+  </section>
+
+  <section class="panel hidden" data-panel="search">
+    <form id="form-search" class="filters">
+      <label class="grow">Nom ou catalogue
+        <input type="search" name="name" placeholder="M 31, NGC 7000, Cœur, Jupiter…">
+      </label>
+      <label>Type
+        <select name="types" class="type-select"></select>
+      </label>
+      <label>Tri
+        <select name="order">
+          <option value="">Pertinence / magnitude</option>
+          <option value="imaging_time">Temps de pose possible</option>
+          <option value="popularity">Popularité</option>
+          <option value="transit">Heure de transit</option>
+          <option value="size">Taille</option>
+          <option value="mag">Magnitude</option>
+        </select>
+      </label>
+      <label>Alt. min (°)
+        <input type="number" name="min_alt" min="0" max="90" placeholder="—">
+      </label>
+      <label>Durée min (min)
+        <input type="number" name="min_alt_minutes" min="1" max="1440" placeholder="—">
+      </label>
+      <label>Taille min (′)
+        <input type="number" name="size_min" min="0" step="1" placeholder="—">
+      </label>
+      <label>Lune
+        <select name="moon_dist_min" class="moon-select"></select>
+      </label>
+      <button type="submit">Rechercher</button>
+    </form>
+  </section>
+
+  <section class="panel hidden" data-panel="lists">
+    <form id="form-lists" class="filters">
+      <label class="grow">Liste
+        <select name="list" id="list-select"><option value="">Chargement…</option></select>
+      </label>
+      <button type="button" id="lists-refresh" class="ghost">Recharger depuis Telescopius</button>
+    </form>
+    <p class="panel-hint">Tes listes d'observation Telescopius. Les angles de cadrage enregistrés (mosaïques…) sont repris comme rotation.</p>
+  </section>
+
+  <div id="status" class="status"></div>
+  <div id="results" class="grid"></div>
+  <div id="pager" class="pager hidden">
+    <button id="page-prev" class="ghost">← Précédent</button>
+    <span id="page-info"></span>
+    <button id="page-next" class="ghost">Suivant →</button>
+  </div>
+
+  <dialog id="settings">
+    <form id="form-settings" method="dialog">
+      <h2>Réglages</h2>
+      <fieldset>
+        <legend>Telescopius</legend>
+        <label>Clé API
+          <input type="password" name="api_key" autocomplete="off" placeholder="inchangée">
+        </label>
+        <div class="hint">Crée-la sur telescopius.com → Paramètres → API. Elle reste sur cette machine.</div>
+      </fieldset>
+      <fieldset>
+        <legend>Site d'observation</legend>
+        <div class="row">
+          <label>Latitude (°)
+            <input type="number" name="latitude" step="any" min="-90" max="90" required>
+          </label>
+          <label>Longitude (°, Est +)
+            <input type="number" name="longitude" step="any" min="-180" max="180" required>
+          </label>
+          <label>Altitude (m)
+            <input type="number" name="elevation" step="any">
+          </label>
+        </div>
+        <label>Nom du site
+          <input type="text" name="location_name" placeholder="Jardin">
+        </label>
+        <button type="button" id="geolocate" class="ghost">Utiliser la position de ce navigateur</button>
+        <div class="hint">Mets le même site que dans NINA. NINA peut aussi l'importer : Options → Général → Astrométrie, bouton « Obtenir la localisation depuis le logiciel Planétarium ».</div>
+      </fieldset>
+      <fieldset>
+        <legend>Nom transmis à NINA</legend>
+        <label class="check"><input type="radio" name="name_format" value="name"> Nom courant (« Heart Nebula »)</label>
+        <label class="check"><input type="radio" name="name_format" value="id"> Désignation (« IC 1805 »)</label>
+        <label class="check"><input type="radio" name="name_format" value="both"> Les deux (« IC 1805 Heart Nebula »)</label>
+      </fieldset>
+      <div id="settings-error" class="error"></div>
+      <div class="dialog-actions">
+        <button type="button" id="settings-cancel" class="ghost">Annuler</button>
+        <button type="submit" id="settings-save">Enregistrer</button>
+      </div>
+    </form>
+  </dialog>
+
+  <template id="card-template">
+    <article class="card">
+      <div class="thumb"><img loading="lazy" alt="" referrerpolicy="no-referrer"></div>
+      <div class="card-body">
+        <h3 class="card-title"></h3>
+        <div class="card-sub"></div>
+        <div class="card-meta"></div>
+        <div class="card-tonight"></div>
+        <div class="card-notes"></div>
+        <div class="card-actions">
+          <button class="select-btn">Envoyer à NINA</button>
+          <a class="ext" target="_blank" rel="noopener">Telescopius ↗</a>
+        </div>
+      </div>
+    </article>
+  </template>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

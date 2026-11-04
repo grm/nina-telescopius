@@ -1,0 +1,23 @@
+{
+ "id": "abc12345",
+ "user_id": 1,
+ "name": "Test list",
+ "location_id": null,
+ "created": "2025-01-01 20:00:00",
+ "order_by": "set",
+ "order_by_direction": "ASC",
+ "url": "/observing-lists/abc12345",
+ "targets": [
+  {"id": 1001, "user_id": 1, "object_id": "IC 1396", "name": "Elephant Trunk", "ra_hr": 21.64966774, "dec": 57.51388931,
+   "ra_hr_jnow": 21.66356804, "dec_jnow": 57.63607649, "size_deg": 2.433333, "fov_width_deg": null, "fov_height_deg": null,
+   "visual_mag": null, "constellation_id": "CEP", "position_angle_east": null, "position_angle_east_jnow": null,
+   "framing_id": null, "framing_data": null, "panel_number": null, "notes": null,
+   "thumbnail_url": "https://storage.telescopius.com/img/dsos/f1f4e35000154107655b31ee6e757d66_thumbnail.webp"},
+  {"id": 1002, "user_id": 1, "object_id": null, "name": "Orion - pane 1 of 2", "ra_hr": 5.58, "dec": -5.39,
+   "ra_hr_jnow": 5.5946, "dec_jnow": -5.3741, "size_deg": 2.9, "fov_width_deg": 2.9, "fov_height_deg": 1.9,
+   "visual_mag": 4, "constellation_id": "ORI", "position_angle_east": 12.5, "position_angle_east_jnow": 12.6,
+   "framing_id": null, "framing_data": null, "panel_number": 1, "notes": "Refractor 140 mm\nIMX455",
+   "thumbnail_url": null},
+  {"id": 1003, "user_id": 1, "object_id": "BROKEN", "name": "No coordinates", "ra_hr": null, "dec": null}
+ ]
+}

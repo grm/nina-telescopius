@@ -1,0 +1,9 @@
+config.json
+state.json
+*.tmp
+__pycache__/
+*.pyc
+.venv/
+tests/nina_compat/bin/
+tests/nina_compat/obj/
+tests/nina_compat/vendor/

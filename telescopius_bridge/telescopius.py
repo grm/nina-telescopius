@@ -26,7 +26,9 @@ SEARCH_PARAMS = (
     "moon_dist_min", "mag_max", "size_min", "size_max", "order", "order_asc",
     "results_per_page", "page", "datetime",
 )
-HIGHLIGHT_PARAMS = ("types", "min_alt", "min_alt_minutes", "moon_dist_min", "datetime")
+# results_per_page/page are undocumented for highlights but honoured (default is 10).
+HIGHLIGHT_PARAMS = ("types", "min_alt", "min_alt_minutes", "moon_dist_min", "datetime",
+                    "results_per_page", "page")
 
 _TZ_RE = re.compile(r"^[A-Za-z0-9_+\-]+(/[A-Za-z0-9_+\-]+)*$")
 

@@ -1,7 +1,8 @@
 "use strict";
 
 const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
-const PAGE_SIZE = 24;
+const PAGE_SIZES = [24, 48, 96, 120]; // Telescopius caps results_per_page at 120
+const DEFAULT_PAGE_SIZE = 48;
 
 const TYPE_OPTIONS = [
   ["DEEP_SKY_OBJECT", "Ciel profond (tout)"],
@@ -31,7 +32,8 @@ let state = null;           // last /ui/api/state
 let currentTab = "tonight";
 let lastResults = [];
 let lastNight = null;
-let searchPage = 1;
+let currentPage = 1;
+let pagerLoad = null; // loads another page of the current paged view
 let requestSeq = 0;
 
 // ---------------------------------------------------------------- helpers
@@ -566,15 +568,25 @@ function formParams(form) {
   return params;
 }
 
-function loadTonight(refresh = false) {
+function pageSummary(data, page, perPage, what) {
+  if (!data.matched || !data.targets.length) return "Aucun résultat.";
+  const from = (page - 1) * perPage + 1;
+  return `${what} ${from}–${from + data.targets.length - 1} sur ${data.matched}.`;
+}
+
+function loadTonight(page = 1) {
   const params = formParams($("#form-tonight"));
-  if (refresh) params.refresh = 1;
+  const perPage = Number(params.results_per_page) || DEFAULT_PAGE_SIZE;
+  params.page = page;
+  currentPage = page;
+  pagerLoad = loadTonight;
   return runLoad(async () => {
     const data = await api("/ui/api/highlights?" + query(params));
     return {
       targets: data.targets,
       night: data.night,
-      summary: `${data.targets.length} cible(s) à leur meilleure période en ce moment (${data.matched} correspondances).`,
+      summary: pageSummary(data, page, perPage, "Cibles à leur meilleure période en ce moment :"),
+      pager: { page, matched: data.matched, perPage },
     };
   }, "Chargement des cibles du moment");
 }
@@ -586,22 +598,23 @@ function loadSearch(page = 1) {
   }
   if (["imaging_time", "popularity", "size"].includes(params.order)) params.order_asc = 0;
   if (params.size_min) params.size_min = params.size_min * 60; // arcmin -> arcsec
-  params.results_per_page = PAGE_SIZE;
+  const perPage = Number(params.results_per_page) || DEFAULT_PAGE_SIZE;
   params.page = page;
-  searchPage = page;
+  currentPage = page;
+  pagerLoad = loadSearch;
   return runLoad(async () => {
     const data = await api("/ui/api/search?" + query(params));
     return {
       targets: data.targets,
       night: data.night,
-      summary: data.matched ? `${data.matched} résultat(s).` : "Aucun résultat.",
-      pager: { page, matched: data.matched },
+      summary: pageSummary(data, page, perPage, "Résultats"),
+      pager: { page, matched: data.matched, perPage },
     };
   }, "Recherche");
 }
 
-function renderPager({ page, matched }) {
-  const pages = Math.max(1, Math.ceil(matched / PAGE_SIZE));
+function renderPager({ page, matched, perPage }) {
+  const pages = Math.max(1, Math.ceil(matched / perPage));
   $("#pager").classList.toggle("hidden", pages <= 1);
   $("#page-info").textContent = `Page ${page} / ${pages}`;
   $("#page-prev").disabled = page <= 1;
@@ -721,6 +734,12 @@ function fillSelect(select, options) {
 function init() {
   for (const s of $$(".type-select")) fillSelect(s, TYPE_OPTIONS);
   for (const s of $$(".moon-select")) fillSelect(s, MOON_OPTIONS);
+  const perPage = PAGE_SIZES.includes(Number(localStorage.getItem("perPage")))
+    ? localStorage.getItem("perPage") : String(DEFAULT_PAGE_SIZE);
+  for (const s of $$(".per-page-select")) {
+    fillSelect(s, PAGE_SIZES.map((n) => [String(n), String(n)]));
+    s.value = perPage;
+  }
   $("#form-search").types.value = "";
 
   if (localStorage.getItem("night") === "1") document.body.classList.add("night");
@@ -732,8 +751,20 @@ function init() {
   for (const b of $$(".tabs button")) b.addEventListener("click", () => switchTab(b.dataset.tab));
   $("#form-tonight").addEventListener("submit", (e) => { e.preventDefault(); loadTonight(); });
   $("#form-search").addEventListener("submit", (e) => { e.preventDefault(); loadSearch(1); });
-  $("#page-prev").addEventListener("click", () => loadSearch(searchPage - 1));
-  $("#page-next").addEventListener("click", () => loadSearch(searchPage + 1));
+  const goToPage = async (page) => {
+    await pagerLoad(page);
+    $("#status").scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+  $("#page-prev").addEventListener("click", () => goToPage(currentPage - 1));
+  $("#page-next").addEventListener("click", () => goToPage(currentPage + 1));
+  for (const s of $$(".per-page-select")) {
+    s.addEventListener("change", () => {
+      localStorage.setItem("perPage", s.value);
+      for (const other of $$(".per-page-select")) other.value = s.value;
+      if (currentTab === "tonight") loadTonight(1);
+      else if (currentTab === "search" && lastResults.length) loadSearch(1);
+    });
+  }
   $("#list-select").addEventListener("change", () => loadList());
   $("#lists-refresh").addEventListener("click", () => loadLists(true));
 

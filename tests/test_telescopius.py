@@ -83,7 +83,7 @@ class _FakeApi(BaseHTTPRequestHandler):
             return self._reply(401, {"error": {"status": 401, "message": "Unauthorized"}})
         if self.path.startswith("/fail429"):
             return self._reply(429, {"error": {"status": 429, "message": "Too many"}}, {"x-ratelimit-remaining": "0"})
-        if self.path.startswith("/targets/search"):
+        if self.path.startswith(("/targets/search", "/targets/highlights")):
             return self._reply(200, fixture("highlights.json"), {"x-ratelimit-remaining": "42"})
         return self._reply(404, {"error": {"status": 404, "message": "nope"}})
 
@@ -127,6 +127,14 @@ class ClientTest(unittest.TestCase):
         self.assertEqual(self.client.rate_limit_remaining, 42)
         self.client.search({"name": "m31"}, loc, refresh=True)
         self.assertEqual(len(_FakeApi.calls), 2)
+
+    def test_highlights_forwards_paging(self):
+        self.client.highlights({"results_per_page": "120", "page": "3", "name": "ignored"}, {})
+        path = _FakeApi.calls[0][0]
+        self.assertTrue(path.startswith("/targets/highlights?"))
+        for part in ("results_per_page=120", "page=3"):
+            self.assertIn(part, path)
+        self.assertNotIn("name=", path)
 
     def test_bad_timezone_is_dropped(self):
         self.client.search({}, {"latitude": None, "longitude": None, "timezone": "x&y=1"})

@@ -11,7 +11,7 @@ import socket
 import sys
 import threading
 from collections import deque
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Deque, Dict, List, Optional, Tuple
@@ -131,14 +131,36 @@ class App:
         config = self.store.config
         return {"latitude": config["latitude"], "longitude": config["longitude"], "timezone": tz}
 
-    def add_visibility(self, targets: List[Dict[str, Any]]) -> None:
+    def add_sky_data(self, result: Dict[str, Any], date: Optional[str] = None,
+                     with_visibility: bool = False) -> Dict[str, Any]:
+        """Adds the night's sampling grid (`night`) and each target's altitude over it
+        (`altitude_curve`), plus the altitude-now summary for list targets."""
         config = self.store.config
-        if config["latitude"] is None or config["longitude"] is None:
-            return
+        lat, lon = config["latitude"], config["longitude"]
+        if lat is None or lon is None:
+            return result
         now = datetime.now(timezone.utc)
-        for t in targets:
-            t["visibility"] = astro.visibility_summary(t["ra"], t["dec"], config["latitude"],
-                                                       config["longitude"], now)
+        night = astro.night(lat, lon, _night_reference(date, lon) or now)
+        start = datetime.fromisoformat(night["start"])
+        result["night"] = night
+        for t in result["targets"]:
+            t["altitude_curve"] = astro.altitude_series(t["ra"], t["dec"], lat, lon, start,
+                                                        night["step_minutes"], night["count"])
+            if with_visibility:
+                t["visibility"] = astro.visibility_summary(t["ra"], t["dec"], lat, lon, now)
+        return result
+
+
+def _night_reference(date: Optional[str], longitude: float) -> Optional[datetime]:
+    """For a "YYYY-MM-DD" date, an instant just after that day's local solar noon,
+    so that astro.night() picks the night starting that evening."""
+    if not date:
+        return None
+    try:
+        day = datetime.strptime(date[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+    return day + timedelta(hours=12 - longitude / 15.0, minutes=1)
 
 
 def make_handler(app: App):
@@ -271,18 +293,19 @@ def make_handler(app: App):
                 return self._json(200, app.public_state())
 
             if path == "/ui/api/highlights" and method == "GET":
-                return self._json(200, app.client.highlights(query, app.location(tz), refresh))
+                result = app.client.highlights(query, app.location(tz), refresh)
+                return self._json(200, app.add_sky_data(result, query.get("datetime")))
 
             if path == "/ui/api/search" and method == "GET":
-                return self._json(200, app.client.search(query, app.location(tz), refresh))
+                result = app.client.search(query, app.location(tz), refresh)
+                return self._json(200, app.add_sky_data(result, query.get("datetime")))
 
             if path == "/ui/api/lists" and method == "GET":
                 return self._json(200, {"lists": app.client.lists(refresh)})
 
             if path.startswith("/ui/api/lists/") and method == "GET":
                 result = app.client.target_list(path[len("/ui/api/lists/"):], refresh)
-                app.add_visibility(result["targets"])
-                return self._json(200, result)
+                return self._json(200, app.add_sky_data(result, with_visibility=True))
 
             if path == "/ui/api/selection":
                 if method == "POST":

@@ -162,3 +162,46 @@ fieldset > label:not(.check), .row label { display: flex; flex-direction: column
 .row { display: flex; gap: 10px; }
 .row label { flex: 1; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
+
+/* Altitude chart */
+:root { --band-day: #4c5258; --band-twilight: #2f343b; }
+body.night { --band-day: #5a1d18; --band-twilight: #350f0d; }
+.card-chart { margin: 4px 0 2px; }
+.alt-chart { display: block; overflow: visible; outline: none; touch-action: pan-y; }
+.alt-chart:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+.band-day { fill: var(--band-day); }
+.band-twilight { fill: var(--band-twilight); }
+.axis { stroke: var(--border); stroke-width: 1; }
+.threshold { stroke: var(--muted); stroke-width: 1; opacity: .7; }
+.now { stroke: var(--text); stroke-width: 1; opacity: .55; }
+.alt-line { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.alt-area { fill: var(--accent); opacity: .10; }
+.peak, .cross-dot { fill: var(--accent); stroke: var(--panel); stroke-width: 2; }
+.crosshair { stroke: var(--text); stroke-width: 1; opacity: .8; }
+.alt-chart .hidden { display: none; }
+.ylabel, .xlabel, .peak-label { font-size: 10px; fill: var(--muted); }
+.ylabel { text-anchor: end; }
+.ylabel-threshold { fill: var(--text); }
+.xlabel, .peak-label { text-anchor: middle; }
+.peak-label { fill: var(--text); font-weight: 600; paint-order: stroke; stroke: var(--panel); stroke-width: 3px; }
+.chart-summary { font-size: 12px; color: var(--muted); }
+.chart-summary b { color: var(--text); font-weight: 600; }
+.chart-tip {
+  position: absolute; z-index: 20; pointer-events: none;
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
+  padding: 5px 9px; font-size: 12px; display: flex; flex-direction: column; gap: 1px;
+  box-shadow: 0 4px 12px rgba(0,0,0,.4);
+}
+.chart-tip strong { font-size: 14px; }
+.chart-tip span { color: var(--muted); }
+.chart-legend { display: flex; flex-wrap: wrap; gap: 4px 16px; align-items: center; font-size: 12px; color: var(--muted); margin: -6px 2px 12px; }
+.legend-item { display: inline-flex; align-items: center; gap: 6px; }
+.legend-note { color: var(--text); }
+.key { display: inline-block; width: 16px; }
+.key-line { height: 2px; background: var(--accent); border-radius: 1px; }
+.key-threshold { height: 1px; background: var(--muted); }
+.key-now { width: 1px; height: 12px; background: var(--text); opacity: .55; }
+.key-band { width: 14px; height: 10px; border-radius: 2px; border: 1px solid var(--border); }
+.key-band.band-day { background: var(--band-day); }
+.key-band.band-twilight { background: var(--band-twilight); }
+.key-band.band-dark { background: var(--panel); }

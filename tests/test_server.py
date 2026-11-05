@@ -160,6 +160,25 @@ class BridgeServerTest(ServerFixture):
         self.assertEqual(location, {"latitude": 48.8566, "longitude": 2.3522, "timezone": "Europe/Paris"})
         self.assertEqual(filters, {"min_alt": "30"})
 
+    def test_results_carry_night_and_altitude_curves(self):
+        for path in ("/ui/api/highlights?tz=UTC", "/ui/api/search?tz=UTC&name=x", "/ui/api/lists/abc12345"):
+            _, data = self.request(path)
+            night = data["night"]
+            self.assertEqual(len(night["sun_alt"]), night["count"])
+            for t in data["targets"]:
+                self.assertEqual(len(t["altitude_curve"]), night["count"], path)
+                self.assertTrue(all(-90 <= a <= 90 for a in t["altitude_curve"]))
+
+    def test_night_follows_requested_date(self):
+        _, data = self.request("/ui/api/highlights?tz=UTC&datetime=2027-01-15")
+        self.assertEqual(data["night"]["events"]["sunset"][:10], "2027-01-15")
+
+    def test_no_curves_without_location(self):
+        self.store.update_config({"latitude": None, "longitude": None})
+        _, data = self.request("/ui/api/highlights?tz=UTC")
+        self.assertNotIn("night", data)
+        self.assertNotIn("altitude_curve", data["targets"][0])
+
     def test_list_targets_get_visibility(self):
         status, data = self.request("/ui/api/lists/abc12345?tz=UTC")
         self.assertEqual(status, 200)

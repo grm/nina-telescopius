@@ -30,6 +30,7 @@ const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 let state = null;           // last /ui/api/state
 let currentTab = "tonight";
 let lastResults = [];
+let lastNight = null;
 let searchPage = 1;
 let requestSeq = 0;
 
@@ -214,9 +215,261 @@ function pushRotation() {
   }, 350);
 }
 
+
+// ---------------------------------------------------------------- altitude chart
+const SVG_NS = "http://www.w3.org/2000/svg";
+const CHART = { height: 112, top: 16, bottom: 18, left: 26, right: 8 };
+const SUN_SET_ALT = -0.833;
+const DARK_SUN_ALT = -18;
+
+function svg(tag, attrs = {}, parent) {
+  const e = document.createElementNS(SVG_NS, tag);
+  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+  if (parent) parent.append(e);
+  return e;
+}
+
+function skyClass(sunAlt) {
+  if (sunAlt > SUN_SET_ALT) return "day";
+  if (sunAlt > DARK_SUN_ALT) return "twilight";
+  return "dark";
+}
+const SKY_LABEL = { day: "Jour", twilight: "Crépuscule", dark: "Nuit noire" };
+
+function minAltitude() {
+  const form = currentTab === "search" ? $("#form-search") : $("#form-tonight");
+  const v = Number(form.min_alt.value);
+  return currentTab !== "lists" && form.min_alt.value !== "" && v >= 0 && v <= 90 ? v : 30;
+}
+
+function hhmm(date) {
+  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+let tooltipEl = null;
+function tooltip() {
+  if (!tooltipEl) {
+    tooltipEl = el("div", null, "chart-tip hidden");
+    tooltipEl.setAttribute("role", "status");
+    document.body.append(tooltipEl);
+  }
+  return tooltipEl;
+}
+
+/** Fills `box` with the altitude-over-the-night chart of `t` and its text summary. */
+function drawAltitudeChart(box, t, night, minAlt) {
+  box.replaceChildren();
+  const curve = t.altitude_curve;
+  const n = curve.length;
+  const W = Math.max(200, Math.floor(box.clientWidth));
+  const { height: H, top, bottom, left, right } = CHART;
+  const plotW = W - left - right;
+  const plotH = H - top - bottom;
+  const start = new Date(night.start).getTime();
+  const stepMs = night.step_minutes * 60000;
+  const timeAt = (i) => new Date(start + i * stepMs);
+  const x = (i) => left + (i / (n - 1)) * plotW;
+  const y = (alt) => top + ((90 - Math.min(90, Math.max(0, alt))) / 90) * plotH;
+
+  const root = svg("svg", { width: W, height: H, viewBox: `0 0 ${W} ${H}`, class: "alt-chart", tabindex: 0 });
+
+  // Sky bands (context): consecutive samples of the same class merged into one rect.
+  let bandStart = 0;
+  for (let i = 1; i <= n; i++) {
+    const cls = skyClass(night.sun_alt[bandStart]);
+    if (i < n && skyClass(night.sun_alt[i]) === cls) continue;
+    if (cls !== "dark") {
+      const x0 = bandStart === 0 ? left : (x(bandStart - 1) + x(bandStart)) / 2;
+      const x1 = i === n ? left + plotW : (x(i - 1) + x(i)) / 2;
+      svg("rect", { x: x0, y: top, width: Math.max(0, x1 - x0), height: plotH, class: `band band-${cls}` }, root);
+    }
+    bandStart = i;
+  }
+
+  // Recessive frame: horizon baseline, threshold, y labels.
+  svg("line", { x1: left, x2: left + plotW, y1: y(0), y2: y(0), class: "axis" }, root);
+  svg("line", { x1: left, x2: left + plotW, y1: y(minAlt), y2: y(minAlt), class: "threshold" }, root);
+  for (const [alt, cls] of [[0, ""], [minAlt, " ylabel-threshold"], [90, ""]]) {
+    if (alt !== 0 && alt !== 90 && (Math.abs(alt - 90) < 12 || alt < 12)) continue;
+    const label = svg("text", { x: left - 4, y: y(alt) + 3, class: "ylabel" + cls }, root);
+    label.textContent = `${alt}°`;
+  }
+
+  // Hour ticks in local time, every 2 h (3 h if cramped).
+  const hours = (n - 1) * stepMs / 3600000;
+  const every = plotW / hours < 16 ? 3 : 2;
+  const first = new Date(start);
+  first.setMinutes(0, 0, 0);
+  for (let ts = first.getTime() + 3600000; ts <= start + (n - 1) * stepMs; ts += 3600000) {
+    const d = new Date(ts);
+    if (d.getHours() % every !== 0) continue;
+    const xi = left + ((ts - start) / stepMs / (n - 1)) * plotW;
+    if (xi < left + 8 || xi > left + plotW - 8) continue;
+    svg("line", { x1: xi, x2: xi, y1: y(0), y2: y(0) + 3, class: "axis" }, root);
+    const label = svg("text", { x: xi, y: H - 4, class: "xlabel" }, root);
+    label.textContent = `${d.getHours()}h`;
+  }
+
+  // Altitude line (2px) + 10% wash, drawn only above the horizon.
+  const segments = [];
+  let seg = null;
+  for (let i = 0; i < n; i++) {
+    const above = curve[i] >= 0;
+    if (above && !seg) {
+      seg = [];
+      if (i > 0) { // enter at the interpolated horizon crossing
+        const f = -curve[i - 1] / (curve[i] - curve[i - 1]);
+        seg.push([x(i - 1) + f * (x(i) - x(i - 1)), y(0)]);
+      }
+    }
+    if (above) seg.push([x(i), y(curve[i])]);
+    if (seg && (!above || i === n - 1)) {
+      if (!above) {
+        const f = curve[i - 1] / (curve[i - 1] - curve[i]);
+        seg.push([x(i - 1) + f * (x(i) - x(i - 1)), y(0)]);
+      }
+      segments.push(seg);
+      seg = null;
+    }
+  }
+  for (const s of segments) {
+    const pts = s.map(([px, py]) => `${px.toFixed(1)},${py.toFixed(1)}`).join(" ");
+    svg("polygon", { points: `${s[0][0].toFixed(1)},${y(0)} ${pts} ${s[s.length - 1][0].toFixed(1)},${y(0)}`, class: "alt-area" }, root);
+    svg("polyline", { points: pts, class: "alt-line" }, root);
+  }
+
+  // "Now" marker.
+  const nowIdx = (Date.now() - start) / stepMs;
+  if (nowIdx >= 0 && nowIdx <= n - 1) {
+    const xn = left + (nowIdx / (n - 1)) * plotW;
+    svg("line", { x1: xn, x2: xn, y1: top, y2: y(0), class: "now" }, root);
+  }
+
+  // Direct label on the highest point once the Sun is down (the window starts
+  // an hour before sunset, so an object setting in the evening peaks in daylight).
+  let peak = -1;
+  for (let i = 0; i < n; i++) {
+    if (night.sun_alt[i] > SUN_SET_ALT) continue;
+    if (peak < 0 || curve[i] > curve[peak]) peak = i;
+  }
+  if (peak < 0) peak = curve.indexOf(Math.max(...curve));
+  if (curve[peak] > 0) {
+    const px = x(peak), py = y(curve[peak]);
+    svg("circle", { cx: px, cy: py, r: 4, class: "peak" }, root);
+    const label = svg("text", { x: Math.min(Math.max(px, left + 34), left + plotW - 34), y: py - 7, class: "peak-label" }, root);
+    label.textContent = `${Math.round(curve[peak])}° · ${hhmm(timeAt(peak))}`;
+  }
+
+  // Hover / keyboard layer: crosshair snapped to the nearest sample.
+  const cross = svg("line", { y1: top, y2: y(0), class: "crosshair hidden" }, root);
+  const dot = svg("circle", { r: 4, class: "cross-dot hidden" }, root);
+  let focusIdx = null;
+  const show = (i, clientX, clientY) => {
+    i = Math.max(0, Math.min(n - 1, i));
+    focusIdx = i;
+    cross.setAttribute("x1", x(i));
+    cross.setAttribute("x2", x(i));
+    cross.classList.remove("hidden");
+    dot.classList.toggle("hidden", curve[i] < 0);
+    dot.setAttribute("cx", x(i));
+    dot.setAttribute("cy", y(curve[i]));
+    const tip = tooltip();
+    tip.replaceChildren(
+      el("strong", curve[i] < 0 ? "sous l'horizon" : `${Math.round(curve[i])}°`),
+      el("span", `${hhmm(timeAt(i))} · ${SKY_LABEL[skyClass(night.sun_alt[i])]}`),
+    );
+    tip.classList.remove("hidden");
+    const rect = root.getBoundingClientRect();
+    const tx = clientX ?? rect.left + x(i);
+    const ty = clientY ?? rect.top + y(Math.max(0, curve[i]));
+    const tw = tip.offsetWidth;
+    tip.style.left = `${Math.min(window.innerWidth - tw - 8, Math.max(8, tx + 12))}px`;
+    tip.style.top = `${Math.max(8, ty - 44) + window.scrollY}px`;
+  };
+  const hide = () => {
+    cross.classList.add("hidden");
+    dot.classList.add("hidden");
+    tooltip().classList.add("hidden");
+  };
+  root.addEventListener("pointermove", (ev) => {
+    const rect = root.getBoundingClientRect();
+    show(Math.round(((ev.clientX - rect.left - left) / plotW) * (n - 1)), ev.clientX, ev.clientY);
+  });
+  root.addEventListener("pointerleave", hide);
+  root.addEventListener("focus", () => show(nowIdx >= 0 && nowIdx <= n - 1 ? Math.round(nowIdx) : peak));
+  root.addEventListener("blur", hide);
+  root.addEventListener("keydown", (ev) => {
+    const delta = { ArrowLeft: -1, ArrowRight: 1, PageDown: -6, PageUp: 6 }[ev.key];
+    if (delta) { ev.preventDefault(); show((focusIdx ?? peak) + delta); }
+    if (ev.key === "Escape") hide();
+  });
+
+  // Text summary: the chart's key numbers stay readable without hovering.
+  // Without astronomical darkness (high latitude summer) count from sunset.
+  const hasDark = night.sun_alt.some((a) => a <= DARK_SUN_ALT);
+  const sunLimit = hasDark ? DARK_SUN_ALT : SUN_SET_ALT;
+  const when = hasDark ? "en nuit noire" : "Soleil couché (pas de nuit noire)";
+  let firstOk = -1, lastOk = -1, okSamples = 0;
+  for (let i = 0; i < n; i++) {
+    if (curve[i] >= minAlt && night.sun_alt[i] <= sunLimit) {
+      if (firstOk < 0) firstOk = i;
+      lastOk = i;
+      okSamples++;
+    }
+  }
+  const hoursOk = (okSamples * night.step_minutes) / 60;
+  const summary = el("div", null, "chart-summary");
+  if (okSamples) {
+    summary.append(`≥ ${minAlt}° ${when} : `, el("b", `${hhmm(timeAt(firstOk))} → ${hhmm(timeAt(lastOk))}`),
+      ` (${hoursOk.toFixed(1)} h)`);
+  } else {
+    summary.append(el("span", `Jamais au-dessus de ${minAlt}° ${when}`, "low"));
+  }
+  root.setAttribute("role", "img");
+  root.setAttribute("aria-label", `Altitude de ${t.id || t.common_name} pendant la nuit. Maximum ${Math.round(curve[peak])}° à ${hhmm(timeAt(peak))}. ${summary.textContent}.`);
+  box.append(root, summary);
+}
+
+function renderChartLegend(night, minAlt) {
+  const box = $("#chart-legend");
+  box.replaceChildren();
+  box.classList.toggle("hidden", !night);
+  if (!night) return;
+  const item = (keyCls, text) => {
+    const s = el("span", null, "legend-item");
+    s.append(el("i", null, `key ${keyCls}`), text);
+    box.append(s);
+  };
+  item("key-line", "Altitude de la cible");
+  item("key-threshold", `Altitude min (${minAlt}°)`);
+  item("key-now", "Maintenant");
+  item("key-band band-day", "Jour");
+  item("key-band band-twilight", "Crépuscule");
+  item("key-band band-dark", "Nuit noire (Soleil < −18°)");
+  const ev = night.events;
+  if (ev.astronomical_dusk && ev.astronomical_dawn) {
+    box.append(el("span", `Nuit noire ${hhmm(new Date(ev.astronomical_dusk))} → ${hhmm(new Date(ev.astronomical_dawn))}`, "legend-note"));
+  }
+}
+
+let chartJobs = [];
+function drawCharts() {
+  const minAlt = minAltitude();
+  renderChartLegend(lastNight, minAlt);
+  for (const [box, t] of chartJobs) drawAltitudeChart(box, t, lastNight, minAlt);
+}
+
+let resizeTimer = null;
+window.addEventListener("resize", () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(drawCharts, 150);
+});
+
 // ---------------------------------------------------------------- results
-function renderResults(targets) {
+function renderResults(targets, night = null) {
   lastResults = targets;
+  lastNight = night;
+  chartJobs = [];
   const grid = $("#results");
   grid.replaceChildren();
   const tpl = $("#card-template");
@@ -248,6 +501,11 @@ function renderResults(targets) {
       t.position_angle != null ? `PA ${t.position_angle}°` : null,
     ]) if (part) meta.append(el("span", part));
 
+    if (night && t.altitude_curve) {
+      const chartBox = el("div", null, "card-chart");
+      meta.after(chartBox);
+      chartJobs.push([chartBox, t]);
+    }
     $(".card-tonight", card).append(...tonightParts(t));
     if (t.notes) $(".card-notes", card).textContent = t.notes;
 
@@ -256,6 +514,7 @@ function renderResults(targets) {
     $(".select-btn", card).addEventListener("click", () => selectTarget(t));
     grid.append(card);
   }
+  drawCharts();
   markSelectedCards();
 }
 
@@ -291,7 +550,7 @@ async function runLoad(loader, label) {
   try {
     const out = await loader();
     if (seq !== requestSeq) return; // a newer request superseded this one
-    renderResults(out.targets);
+    renderResults(out.targets, out.night);
     setStatus(out.summary);
     if (out.pager) renderPager(out.pager);
   } catch (e) {
@@ -314,6 +573,7 @@ function loadTonight(refresh = false) {
     const data = await api("/ui/api/highlights?" + query(params));
     return {
       targets: data.targets,
+      night: data.night,
       summary: `${data.targets.length} cible(s) à leur meilleure période en ce moment (${data.matched} correspondances).`,
     };
   }, "Chargement des cibles du moment");
@@ -333,6 +593,7 @@ function loadSearch(page = 1) {
     const data = await api("/ui/api/search?" + query(params));
     return {
       targets: data.targets,
+      night: data.night,
       summary: data.matched ? `${data.matched} résultat(s).` : "Aucun résultat.",
       pager: { page, matched: data.matched },
     };
@@ -371,7 +632,7 @@ function loadList(refresh = false) {
   localStorage.setItem("lastList", id);
   return runLoad(async () => {
     const data = await api(`/ui/api/lists/${encodeURIComponent(id)}?` + query(refresh ? { refresh: 1 } : {}));
-    return { targets: data.targets, summary: `${data.targets.length} cible(s) dans « ${data.name} ».` };
+    return { targets: data.targets, night: data.night, summary: `${data.targets.length} cible(s) dans « ${data.name} ».` };
   }, "Chargement de la liste");
 }
 

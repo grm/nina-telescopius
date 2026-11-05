@@ -8,6 +8,13 @@ de Stellarium ; en réalité, les cibles proviennent de Telescopius :
 - **Recherche** : tout le catalogue Telescopius, planètes et comètes comprises, avec filtres ;
 - **Mes listes** : tes listes d'observation Telescopius, y compris les angles de cadrage et les mosaïques.
 
+Chaque carte affiche la **courbe d'altitude de la cible sur la nuit** : du coucher au lever du
+soleil, avec les bandes jour / crépuscule / nuit noire, l'altitude minimale, la culmination et
+l'heure actuelle. Survole la courbe, ou utilise les flèches du clavier, pour lire l'altitude
+heure par heure. Le résumé sous la courbe indique pendant combien de temps la cible reste
+au-dessus de l'altitude minimale en nuit noire. Ces courbes sont calculées localement à partir
+du site configuré.
+
 Tu choisis une cible dans la page web, puis dans NINA tu cliques sur l'icône planétarium
 **« Obtenir les coordonnées du logiciel du planétarium »** (Assistant de cadrage ou cible
 du séquenceur).

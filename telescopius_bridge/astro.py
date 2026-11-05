@@ -122,3 +122,112 @@ def visibility_summary(
         "max_alt": round(culmination_altitude(dec_deg, latitude_deg), 1),
         "transit_utc": transit.astimezone(timezone.utc).replace(microsecond=0).isoformat(),
     }
+
+
+# -- Sun and night ------------------------------------------------------------
+SUNSET_ALT = -0.833  # upper limb on the horizon, with standard refraction
+TWILIGHT_LIMITS = (("civil", -6.0), ("nautical", -12.0), ("astronomical", -18.0))
+
+
+def sun_radec_of_date(jd: float) -> Tuple[float, float]:
+    """Low-precision solar position (Astronomical Almanac, ~0.01 deg), equinox of date."""
+    n = jd - J2000_JD
+    mean_lon = (280.460 + 0.9856474 * n) % 360.0
+    anomaly = math.radians((357.528 + 0.9856003 * n) % 360.0)
+    ecl_lon = math.radians(mean_lon + 1.915 * math.sin(anomaly) + 0.020 * math.sin(2 * anomaly))
+    obliquity = math.radians(23.439 - 0.0000004 * n)
+    ra = math.degrees(math.atan2(math.cos(obliquity) * math.sin(ecl_lon), math.cos(ecl_lon))) % 360.0
+    dec = math.degrees(math.asin(math.sin(obliquity) * math.sin(ecl_lon)))
+    return ra, dec
+
+
+def _altitude_of_date(ra_deg: float, dec_deg: float, latitude_deg: float, longitude_deg: float,
+                      jd: float) -> float:
+    hour_angle = math.radians((lst_deg(jd, longitude_deg) - ra_deg) % 360.0)
+    lat = math.radians(latitude_deg)
+    d = math.radians(dec_deg)
+    sin_alt = math.sin(lat) * math.sin(d) + math.cos(lat) * math.cos(d) * math.cos(hour_angle)
+    return math.degrees(math.asin(max(-1.0, min(1.0, sin_alt))))
+
+
+def sun_altitude(latitude_deg: float, longitude_deg: float, when: datetime) -> float:
+    jd = julian_date(when)
+    ra, dec = sun_radec_of_date(jd)
+    return _altitude_of_date(ra, dec, latitude_deg, longitude_deg, jd)
+
+
+def altitude_series(ra_deg: float, dec_deg: float, latitude_deg: float, longitude_deg: float,
+                    start: datetime, step_minutes: int, count: int) -> List[float]:
+    """Altitudes of a J2000 position at `count` instants `step_minutes` apart.
+    Precession is computed once: it drifts by well under an arcsecond per night."""
+    jd0 = julian_date(start)
+    ra, dec = precess_from_j2000(ra_deg, dec_deg, jd0)
+    step_days = step_minutes / 1440.0
+    return [round(_altitude_of_date(ra, dec, latitude_deg, longitude_deg, jd0 + i * step_days), 1)
+            for i in range(count)]
+
+
+def _crossing(times: List[datetime], values: List[float], level: float, falling: bool) -> Optional[datetime]:
+    for i in range(1, len(values)):
+        a, b = values[i - 1], values[i]
+        if (falling and a > level >= b) or (not falling and a < level <= b):
+            frac = (a - level) / (a - b)
+            return times[i - 1] + (times[i] - times[i - 1]) * frac
+    return None
+
+
+def _iso(when: Optional[datetime]) -> Optional[str]:
+    return when.astimezone(timezone.utc).replace(microsecond=0).isoformat() if when else None
+
+
+def night(latitude_deg: float, longitude_deg: float, when: Optional[datetime] = None,
+          step_minutes: int = 10, margin_minutes: int = 60) -> Dict[str, object]:
+    """Sampling grid covering the coming (or current) night, from one hour before
+    sunset to one hour after sunrise, with the Sun's altitude and twilight times.
+
+    The night is the one following the local solar noon before `when`, unless its
+    sunrise is already past (morning), in which case the next one is used. Where the
+    Sun does not set (or rise), local solar 16:00 to 08:00 is used.
+    """
+    when = when or datetime.now(timezone.utc)
+    solar_noon_offset = timedelta(hours=12 - longitude_deg / 15.0)
+    day0 = when.astimezone(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    noon = day0 + solar_noon_offset
+    while noon > when:
+        noon -= timedelta(days=1)
+    while noon + timedelta(days=1) <= when:
+        noon += timedelta(days=1)
+
+    for _ in range(2):
+        coarse = [noon + timedelta(minutes=m) for m in range(0, 24 * 60 + 1, step_minutes)]
+        sun = [sun_altitude(latitude_deg, longitude_deg, t) for t in coarse]
+        sunset = _crossing(coarse, sun, SUNSET_ALT, falling=True)
+        sunrise = _crossing(coarse, sun, SUNSET_ALT, falling=False)
+        if sunrise and sunset and sunrise < sunset:
+            sunrise = None  # rising before setting: not this night's sunrise
+        if sunrise and when > sunrise + timedelta(minutes=margin_minutes):
+            noon += timedelta(days=1)
+            continue
+        break
+
+    if sunset and sunrise:
+        start = sunset - timedelta(minutes=margin_minutes)
+        end = sunrise + timedelta(minutes=margin_minutes)
+    else:
+        start = noon + timedelta(hours=4)
+        end = noon + timedelta(hours=20)
+    step = timedelta(minutes=step_minutes)
+    start = datetime.fromtimestamp((start.timestamp() // step.total_seconds()) * step.total_seconds(), timezone.utc)
+    count = int((end - start) / step) + 2
+
+    times = [start + i * step for i in range(count)]
+    sun = [round(sun_altitude(latitude_deg, longitude_deg, t), 1) for t in times]
+    events: Dict[str, Optional[str]] = {
+        "sunset": _iso(_crossing(times, sun, SUNSET_ALT, falling=True)),
+        "sunrise": _iso(_crossing(times, sun, SUNSET_ALT, falling=False)),
+    }
+    for name, level in TWILIGHT_LIMITS:
+        events[f"{name}_dusk"] = _iso(_crossing(times, sun, level, falling=True))
+        events[f"{name}_dawn"] = _iso(_crossing(times, sun, level, falling=False))
+    return {"start": _iso(start), "step_minutes": step_minutes, "count": count,
+            "sun_alt": sun, "events": events}
